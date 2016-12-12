@@ -29,10 +29,10 @@
 
 (defn degree-sequence [G v-sub]
   (let [s (select-keys G v-sub)]
-    (->>  (for [[v ns] s]
-            (count (filter v-sub ns)))
-          sort
-          vec)))
+    (->> (for [[v ns] s]
+           (count (filter v-sub ns)))
+         sort
+         vec)))
 
 (degree-sequence tg #{1 2 3})
 
@@ -48,7 +48,7 @@
   Transactions on Computational Biology and Bioinformatics. 3 (4): 347–359.
   doi:10.1109/tcbb.2006.51
 
-  It is a faithful direct implementation of the pseudo code given at in Wernicke
+  It is a faithful direct implementation of the pseudo code given in Wernicke
   2006 as also quoted by https://en.wikipedia.org/wiki/Network_motif
 
   "
@@ -65,18 +65,19 @@
           (recur (conj res v-sub) stack)
           ;; else still work to do => extend stack
           (let [calls (loop [extend-subgraphs []
-                             [w & v-ext] (seq v-ext)]
-                        (if-not w
-                          extend-subgraphs
-                          (let [v-sub' (conj v-sub w)
-                                ;; as defined in section 2.1 of Wernicke 2006
-                                ns-vsub (set/union v-sub (set (mapcat G v-sub)))
-                                ns (set (filter #(and (> % v)
-                                                      (not (ns-vsub %)))
-                                                (G w)))
-                                v-ext' (set/union (set v-ext) ns)]
-                            (recur (conj extend-subgraphs [v-sub' v-ext' v])
-                                   v-ext))))]
+                             v-ext v-ext]
+                        (let [w (rand-nth (seq v-ext))]
+                          (if-not w
+                            extend-subgraphs
+                            (let [v-sub' (conj v-sub w)
+                                  ;; as defined in section 2.1 of Wernicke 2006
+                                  ns-vsub (into v-sub (mapcat G) v-sub)
+                                  v-ext' (into (disj v-ext w)
+                                               (filter #(and (> % v)
+                                                             (not (ns-vsub %))))
+                                               (G w))]
+                              (recur (conj extend-subgraphs [v-sub' v-ext' v])
+                                     (disj v-ext w))))))]
             (recur res (concat calls stack))))))))
 
 ;; G-Trie would also have looked reasonable, but way beyond the scope of this
@@ -86,12 +87,27 @@
 
 (enumerate-subgraphs tg 3)
 
-(def subgraphs (enumerate-subgraphs g 4))
+(time
+ (def g-subgraphs (enumerate-subgraphs g 4)))
 
 (defn degree-seq-counts [subgraphs]
   (->> subgraphs
        (map (partial degree-sequence g))
        frequencies))
+
+(def g-degree-counts (degree-seq-counts g-subgraphs))
+
+(comment
+   ;; =>
+  {[1 1 2 2] 666566,
+   [1 1 1 3] 529287,
+   [2 2 2 2] 131661,
+   [1 2 2 3] 414426,
+   [2 2 3 3] 144942,
+   [3 3 3 3] 14126}
+
+
+  (count (enumerate-subgraphs g 4)))
 
 
 ;; calculate e)
@@ -145,6 +161,56 @@
              (inc n)))))
 
 
+(defn rewire-config-model [g]
+  (let [ds (->> (map (fn [[n nghbs]]
+                       [(count nghbs) n])
+                     g)
+                (reduce (fn [ds [c n]]
+                          (update ds c #(conj (or % #{}) n)))
+                        {}))
+        all-degrees (into [] (keys ds))
+        [a c b d]
+        (first (for [[a b] (repeatedly #(let [dnds (seq (ds (rand-nth all-degrees)))]
+                                          [(rand-nth dnds) (rand-nth dnds)]))
+                     :when (and a b (not= a b))
+                     :let [na (g a)
+                           nb (g b)
+                           c (rand-nth (seq na))
+                           d (rand-nth (seq nb))]
+                     :when (and c d (not= c d)
+                                (not (na d))
+                                (not (nb c)))]
+                 [a c b d]))]
+    (-> g
+        (update a disj c)
+        (update a conj d)
+        (update b disj d)
+        (update b conj c))))
+
+
+
+(defn configuration-model [g steps]
+  (reduce (fn [g _] (rewire-config-model g))
+          g
+          (range steps)))
+
+
+
+(comment
+  (rewire-config-model {1 #{2 3}
+                        2 #{1 5}
+                        3 #{1 2 4}
+                        4 #{3}
+                        5 #{2}})
+
+  (configuration-model {1 #{2 3}
+                        2 #{1 5}
+                        3 #{1 2 4}
+                        4 #{3}
+                        5 #{2}}
+                       10))
+
+
 (defn pat-counts [g]
   (let [subgraphs (enumerate-subgraphs g 4)
         {A [3 3 3 3]
@@ -154,30 +220,65 @@
     [A B C D]))
 
 
-(future
-  (def ers-counts (->> (repeatedly 100 #(erdos-renyi 128 2075))
-                       (map pat-counts)
-                       doall)))
+(def ers-fut
+  (future
+    (def ers-counts (->> (for [i (range 25)]
+                           (do
+                             (prn "er" i)
+                             (time (pat-counts (erdos-renyi 128 2075)))))
+                         doall))))
 
 
-(future
-  (def bars-counts (->> (repeatedly 100 #(barabasi-albert (erdos-renyi 18 95) 110 18))
-                        (map pat-counts)
-                        doall)))
+(def bars-fut
+  (future
+    (def bars-counts (->> (for [i (range 25)]
+                            (do
+                              (prn "bars" i)
+                              (time (pat-counts (barabasi-albert (erdos-renyi 18 95) 110 18)))))
+                          doall))))
 
 
+(def config-fut
+  (future
+    (def config-counts (->> (for [i (range 25)]
+                              (do
+                                (prn "config" i)
+                                (time (pat-counts (configuration-model g 1000)))))
+                            doall))))
 
 
-(degree-seq-counts subgraphs)
-{[1 1 2 2] 666566,
- [1 1 1 3] 529287,
- [2 2 2 2] 131661,
- [1 2 2 3] 414426,
- [2 2 3 3] 144942,
- [3 3 3 3] 14126}
+(defn z-score [c cm sd]
+  (/ (- c cm)
+     sd))
+
+
+(defn -main [& args]
+  @ers-fut @bars-fut @config-fut ;; HACK wait for all futures to finish
+  (let [{A [3 3 3 3]
+         B [2 2 3 3]
+         C [2 2 2 2]
+         D [1 1 2 2]} g-degree-counts
+        g-count [A B C D]
+        ers-mean (s/mean ers-counts)
+        ers-sd (s/sd ers-counts)
+        bars-mean (s/mean bars-counts)
+        bars-sd (s/sd bars-counts)
+        config-mean (s/mean config-counts)
+        config-sd (s/sd config-counts)]
+    (prn
+     [[:erdos ers-mean ers-sd (mapv z-score g-count ers-mean ers-sd)]
+      [:barabasi bars-mean bars-sd (mapv z-score g-count bars-mean bars-sd)]
+      [:config config-mean config-sd (mapv z-score g-count config-mean config-sd)]])))
 
 
 (comment
-  (count (enumerate-subgraphs g 4)))
+  (s/mean ers-counts)
+
+  (s/sd [[1 2 3 4]
+         [1 2 3 4]])
+
+  )
+
+
 
 

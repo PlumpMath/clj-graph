@@ -6,4 +6,6 @@
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [net.mikera/core.matrix "0.57.0"]]
 
+  :main clj-graph.core
+
   :jvm-opts ["-Xmx4g" "-server"])
