@@ -38,10 +38,6 @@
 
 ;; d)
 
-;; FIXME could not access paper behind paywall!
-;; http://ieeexplore.ieee.org/document/4015377/
-;; and offline:
-;; http://theinf1.informatik.uni-jena.de/motifs/
 (defn enumerate-subgraphs
   "Enumeration of ESU (FANMOD)
 
